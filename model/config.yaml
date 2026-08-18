@@ -1,0 +1,20 @@
+# Config file
+
+xml_file: '/temp/deepvision.xml'
+#xml_file: /home/a5515/mnt3/deepvision/redfish/yolo/predictions/20230529T0347Z/deepvision.xml
+path_to_data: '/data/'
+#path_to_data: /data/cruise_data/2023/S2023001006_PGOSARS_4174/BIOLOGY/CATCH_MEASUREMENTS/DEEP_VISION/20230529T0347Z
+trained_model: /model/best.pt
+#trained_model: /home/a5515/mnt3/deepvision/redfish/yolo/runs/train7/model/best.pt
+orientation: ['Left','Right']
+batch: 8
+conf: 0.355
+iou: 0.5
+device: 0
+img_size: 896
+names: ["barracudina", "benthosema", "bluewhiting", "fish", "gelatinous", "gonatus", "herring", "krill", "maurolicus", "pelagic_shrimp", "redfish"]
+#opt_thresholds: {"barracudina":0.416, "benthosema":0.398, "bluewhiting":0.421, "fish":0.570, "gelatinous":0.418, "gonatus":0.534, "herring":0.428, "krill":0.296,"maurolicus":0.372, "pelagic_shrimp":0.407, "redfish":0.578}
+opt_thresholds: {"barracudina":0.516, "benthosema":0.494, "bluewhiting":0.335, "fish":0.235, "gelatinous":0.468, "gonatus":0.422, "herring":0.716, "krill":0.27,"maurolicus":0.433, "pelagic_shrimp":0.405, "redfish":0.505}
+krill: True
+model_name: "yolo_redfish"
+version: 1.0
