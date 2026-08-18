@@ -19,9 +19,11 @@ ENV HOME=/project
 RUN apt-get update && apt-get install -y sudo python3 python3-pip git screen vim
 RUN pip install --upgrade pip
 
-# Configure user
-RUN groupadd -g $gid $user
-RUN useradd -u $uid -g $gid $user
+# Configure user - the base image may already ship a user/group at this uid/gid
+# (e.g. ultralytics/ultralytics:8.4.121's built-in "ubuntu" at 1000:1000), so rename
+# it to $user instead of failing on a duplicate id
+RUN groupadd -g $gid $user 2>/dev/null || groupmod -n $user "$(getent group $gid | cut -d: -f1)"
+RUN useradd -u $uid -g $gid -m $user 2>/dev/null || usermod -l $user -d /home/$user -m "$(getent passwd $uid | cut -d: -f1)"
 RUN usermod -a -G sudo $user
 RUN passwd -d $user
 
@@ -37,7 +39,10 @@ RUN pip3 install --trusted-host pypi.python.org lxml
 #   --build-arg TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu124  (max CUDA 12.5, e.g. this dev laptop)
 #   --build-arg TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu126  (max CUDA 12.6, e.g. the RTX 3090 host)
 ARG TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu126
-RUN pip3 install --index-url $TORCH_CUDA_INDEX torch torchvision
+# --force-reinstall is required: the base image already has *a* torch installed, so a
+# plain `pip install torch` sees that as satisfying the request and silently no-ops
+# without ever consulting $TORCH_CUDA_INDEX, leaving the base image's CUDA build in place
+RUN pip3 install --force-reinstall --index-url $TORCH_CUDA_INDEX torch torchvision
 
 #COPY /redfish_model/train7/weights/best.pt /model/best.pt
 #COPY /redfish_model/config_redfish.yaml /project/YOLO_DV_predict/model/config.yaml
