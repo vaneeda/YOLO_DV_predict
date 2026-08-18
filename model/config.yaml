@@ -4,7 +4,7 @@ xml_file: '/temp/deepvision.xml'
 #xml_file: /home/a5515/mnt3/deepvision/redfish/yolo/predictions/20230529T0347Z/deepvision.xml
 path_to_data: '/data/'
 #path_to_data: /data/cruise_data/2023/S2023001006_PGOSARS_4174/BIOLOGY/CATCH_MEASUREMENTS/DEEP_VISION/20230529T0347Z
-trained_model: /model/best.pt
+trained_model: model/best.pt
 #trained_model: /home/a5515/mnt3/deepvision/redfish/yolo/runs/train7/model/best.pt
 orientation: ['Left','Right']
 batch: 8
