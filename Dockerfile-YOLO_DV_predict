@@ -29,9 +29,10 @@ RUN passwd -d $user
 
 RUN git clone https://github.com/vaneeda/YOLO_DV_predict.git
 
-# ultralytics, pandas, pyyaml, tqdm, Pillow already ship with the ultralytics/ultralytics
-# base image; lxml (used by csv2xml.py) is the only extra package.
-RUN pip3 install --trusted-host pypi.python.org lxml
+# ultralytics, pyyaml, Pillow already ship with the ultralytics/ultralytics base image;
+# pandas and tqdm do not despite being core predict_DV.py imports, and lxml (used by
+# csv2xml.py) is needed too - verified by importing each inside the built image.
+RUN pip3 install --trusted-host pypi.python.org lxml pandas tqdm
 
 # this base image ships torch/torchvision built for CUDA 12.8, which needs a newer
 # driver than some hosts have - reinstall from a CUDA index within that host's driver
