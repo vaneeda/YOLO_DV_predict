@@ -45,15 +45,15 @@ RUN pip3 install --force-reinstall --index-url $TORCH_CUDA_INDEX torch torchvisi
 
 # App code baked in from the local working copy (not GitHub) - so the target machine
 # needs no network access at all, not even to pull code
-COPY predict_DV.py csv2xml.py utils.py /project/YOLO_DV_predict/
+COPY predict_DV.py csv2xml.py utils.py /app/
 
 # Config + weights for one variant, selected at build time, e.g. --build-arg VARIANT=redfish
 # (see variants/<name>/) - copied last so switching variants doesn't invalidate the
 # expensive, network-heavy layers above
 ARG VARIANT
-COPY variants/${VARIANT}/config.yaml /project/YOLO_DV_predict/model/config.yaml
-COPY variants/${VARIANT}/best.pt /project/YOLO_DV_predict/model/best.pt
+COPY variants/${VARIANT}/config.yaml /app/model/config.yaml
+COPY variants/${VARIANT}/best.pt /app/model/best.pt
 
 # Run when the container launches
-CMD ["/bin/bash", "-c", "cd /project/YOLO_DV_predict && python3 predict_DV.py"]
+CMD ["/bin/bash", "-c", "cd /app && python3 predict_DV.py"]
 
