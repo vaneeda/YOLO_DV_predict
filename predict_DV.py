@@ -80,8 +80,10 @@ if __name__ == '__main__':
         csvpath = config['xml_file'].split(".")[0] + "_" + orientation + ".csv"
         df_pred = predict_zip(config, orientation, LUT)
         df = pd.merge(df_xml, df_pred, left_on="datetime", right_on="datetime", how="inner")
-        if not config["krill"]:
-            df = df[df["label"] != "krill"]
+        if "krill" in config["names"]:
+            if not config["krill"]:
+                df.to_csv(csvpath.split(".")[0]+"_krill.csv", index=False)
+                df = df[df["label"] != "krill"]
         df.to_csv(csvpath, index=False)
         csv_file_paths.append(csvpath)
     csv2xml(config["model_name"], config["version"], config['xml_file'], csv_file_paths, config['orientation'])
