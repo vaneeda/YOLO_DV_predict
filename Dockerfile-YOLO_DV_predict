@@ -27,8 +27,6 @@ RUN useradd -u $uid -g $gid -m $user 2>/dev/null || usermod -l $user -d /home/$u
 RUN usermod -a -G sudo $user
 RUN passwd -d $user
 
-RUN git clone https://github.com/vaneeda/YOLO_DV_predict.git
-
 # ultralytics, pyyaml, Pillow already ship with the ultralytics/ultralytics base image;
 # pandas and tqdm do not despite being core predict_DV.py imports, and lxml (used by
 # csv2xml.py) is needed too - verified by importing each inside the built image.
@@ -45,8 +43,17 @@ ARG TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu126
 # without ever consulting $TORCH_CUDA_INDEX, leaving the base image's CUDA build in place
 RUN pip3 install --force-reinstall --index-url $TORCH_CUDA_INDEX torch torchvision
 
-#COPY /redfish_model/train7/weights/best.pt /model/best.pt
-#COPY /redfish_model/config_redfish.yaml /project/YOLO_DV_predict/model/config.yaml
+# App code baked in from the local working copy (not GitHub) - so the target machine
+# needs no network access at all, not even to pull code
+COPY predict_DV.py csv2xml.py utils.py /project/YOLO_DV_predict/
+
+# Config + weights for one variant, selected at build time, e.g. --build-arg VARIANT=redfish
+# (see variants/<name>/) - copied last so switching variants doesn't invalidate the
+# expensive, network-heavy layers above
+ARG VARIANT
+COPY variants/${VARIANT}/config.yaml /project/YOLO_DV_predict/model/config.yaml
+COPY variants/${VARIANT}/best.pt /project/YOLO_DV_predict/model/best.pt
+
 # Run when the container launches
 CMD ["/bin/bash", "-c", "cd /project/YOLO_DV_predict && python3 predict_DV.py"]
 
