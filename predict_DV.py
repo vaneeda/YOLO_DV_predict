@@ -9,19 +9,6 @@ import pandas as pd
 import yaml
 
 
-def predict_with_oom_backoff(model, images, batch, **predict_kwargs):
-    """model.predict(), halving `batch` and retrying on CUDA OOM until it fits.
-    Returns (results, batch) so the caller can keep using the now-known-safe batch size."""
-    while True:
-        try:
-            return model.predict(images, batch=batch, **predict_kwargs), batch
-        except torch.cuda.OutOfMemoryError:
-            torch.cuda.empty_cache()
-            if batch <= 1:
-                raise
-            batch = max(1, batch // 2)
-
-
 def predict_zip(config, orientation, LUT):
     path_to_data = os.path.join(config["path_to_data"], orientation)
     zipfiles = sorted([i for i in os.listdir(path_to_data) if i.endswith("_active.zip")])
@@ -35,42 +22,54 @@ def predict_zip(config, orientation, LUT):
             continue
         image_names = [name for name, _ in image_data]
         images = [image for _, image in image_data]
-        try:
-            results, batch_size = predict_with_oom_backoff(
-                model, images, batch_size, conf=config["conf"], iou=config['iou'], imgsz=config["img_size"],
-                device=config.get("device"), verbose=False,
-                show_labels=False, show_conf=False, show_boxes=False)
-        except torch.cuda.OutOfMemoryError:
-            print(f"warning: skipping {zip_path} - out of GPU memory even at batch=1")
-            torch.cuda.empty_cache()
-            continue
-        for image_name, result in zip(image_names, results):
-            if len(result.boxes) == 0:
-                continue
-            xyxy = result.boxes.xyxy.cpu().numpy()
-            confs = result.boxes.conf.cpu().numpy()
-            classes = result.boxes.cls.cpu().numpy().astype(int)
-            for (x0, y0, x1, y1), conf, cls in zip(xyxy, confs, classes):
-                label = LUT[cls]
-                if config["opt_thresholds"] is not None:
-                    opt_thres = config["opt_thresholds"].get(label)
-                    if opt_thres is not None and conf < opt_thres:
-                        continue
-                predictions.append({
-                    "datetime": image_name.split(".")[0],  # The image name
-                    "x0": int(x0),  # The x-coordinate of the top-left corner
-                    "y0": int(y0),  # The y-coordinate of the top-left corner
-                    "x1": int(x1),  # The x-coordinate of the bottom-right corner
-                    "y1": int(y1),  # The y-coordinate of the bottom-right corner
-                    "label": label,  # The class ID
-                    "score": round(float(conf), 3)  # The confidence score
-                })
-        # drop the last reference to `results` (and its GPU tensors) before emptying
-        # the cache, instead of after - otherwise empty_cache() runs while results is
-        # still alive and has nothing to actually free. gc.collect() is needed too:
+
+        # stream=True is required, not just an optimization: with stream=False,
+        # model.predict() computes and holds a Results object - GPU tensors included -
+        # for every image in `images` before returning any of them, so peak GPU memory
+        # scales with how many images are left in this zip, not with `batch`. Streaming
+        # lets each image's result be pulled off, converted to CPU/numpy, and dropped
+        # before the next one is computed, capping peak memory to ~batch images at a time
+        # regardless of zip size. On OOM, resume from the first unprocessed image instead
+        # of redoing the whole zip.
+        start = 0
+        while start < len(images):
+            try:
+                results = model.predict(
+                    images[start:], batch=batch_size, stream=True,
+                    conf=config["conf"], iou=config['iou'], imgsz=config["img_size"],
+                    device=config.get("device"), verbose=False,
+                    show_labels=False, show_conf=False, show_boxes=False)
+                for result in results:
+                    image_name = image_names[start]
+                    if len(result.boxes) != 0:
+                        xyxy = result.boxes.xyxy.cpu().numpy()
+                        confs = result.boxes.conf.cpu().numpy()
+                        classes = result.boxes.cls.cpu().numpy().astype(int)
+                        for (x0, y0, x1, y1), conf, cls in zip(xyxy, confs, classes):
+                            label = LUT[cls]
+                            if config["opt_thresholds"] is not None:
+                                opt_thres = config["opt_thresholds"].get(label)
+                                if opt_thres is not None and conf < opt_thres:
+                                    continue
+                            predictions.append({
+                                "datetime": image_name.split(".")[0],  # The image name
+                                "x0": int(x0),  # The x-coordinate of the top-left corner
+                                "y0": int(y0),  # The y-coordinate of the top-left corner
+                                "x1": int(x1),  # The x-coordinate of the bottom-right corner
+                                "y1": int(y1),  # The y-coordinate of the bottom-right corner
+                                "label": label,  # The class ID
+                                "score": round(float(conf), 3)  # The confidence score
+                            })
+                    start += 1
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                if batch_size <= 1:
+                    print(f"warning: skipping {len(images) - start} image(s) in {zip_path} - "
+                          f"out of GPU memory even at batch=1")
+                    break
+                batch_size = max(1, batch_size // 2)
         # Results/Boxes hold back-references to each other, so refcounting alone won't
-        # free them - they only die once Python's cyclic collector actually runs
-        del results
+        # free the last image's GPU tensors - they only die once the cyclic collector runs
         gc.collect()
         torch.cuda.empty_cache()  # bound memory fragmentation growth over a long run
     df_pred = pd.DataFrame(predictions)
