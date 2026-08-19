@@ -1,3 +1,4 @@
+import gc
 import os
 import torch
 from ultralytics import YOLO
@@ -66,8 +67,11 @@ def predict_zip(config, orientation, LUT):
                 })
         # drop the last reference to `results` (and its GPU tensors) before emptying
         # the cache, instead of after - otherwise empty_cache() runs while results is
-        # still alive and has nothing to actually free
+        # still alive and has nothing to actually free. gc.collect() is needed too:
+        # Results/Boxes hold back-references to each other, so refcounting alone won't
+        # free them - they only die once Python's cyclic collector actually runs
         del results
+        gc.collect()
         torch.cuda.empty_cache()  # bound memory fragmentation growth over a long run
     df_pred = pd.DataFrame(predictions)
     return df_pred
