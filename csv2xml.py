@@ -110,7 +110,7 @@ def csv2xml(model_name, v, input_xml_path, csv_input_paths, orientations):
     class Framework_data:
         #name = "Fish_species_detector_v1.0_Vaneeda_dockerimage"
         name = model_name
-        version = v
+        version = str(v)
         species = "None"  # Default value if no label is given (labeltype != 'image' and  labeltype != 'all')
         labeltype = "object"  # Fish instances are detected
         confidence = "0"  # Default value if no confidence is given (labeltype != 'image' and  labeltype != 'all')
