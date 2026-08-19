@@ -61,7 +61,14 @@ def predict_zip(config, orientation, LUT):
                                 "score": round(float(conf), 3)  # The confidence score
                             })
                     start += 1
-            except torch.cuda.OutOfMemoryError:
+            except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
+                # torch.cuda.OutOfMemoryError only covers PyTorch's own caching
+                # allocator running out; a driver-level cudaMalloc failure (seen
+                # under Docker Desktop on Windows/WDDM, where the GPU is shared
+                # with the desktop compositor and other apps) surfaces as a plain
+                # RuntimeError instead, so re-raise anything that isn't OOM-shaped
+                if not isinstance(e, torch.cuda.OutOfMemoryError) and "out of memory" not in str(e).lower():
+                    raise
                 torch.cuda.empty_cache()
                 if batch_size <= 1:
                     print(f"warning: skipping {len(images) - start} image(s) in {zip_path} - "
