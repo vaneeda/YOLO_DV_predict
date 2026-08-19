@@ -43,7 +43,6 @@ def predict_zip(config, orientation, LUT):
             print(f"warning: skipping {zip_path} - out of GPU memory even at batch=1")
             torch.cuda.empty_cache()
             continue
-        torch.cuda.empty_cache()  # bound memory fragmentation growth over a long run
         for image_name, result in zip(image_names, results):
             if len(result.boxes) == 0:
                 continue
@@ -65,6 +64,11 @@ def predict_zip(config, orientation, LUT):
                     "label": label,  # The class ID
                     "score": round(float(conf), 3)  # The confidence score
                 })
+        # drop the last reference to `results` (and its GPU tensors) before emptying
+        # the cache, instead of after - otherwise empty_cache() runs while results is
+        # still alive and has nothing to actually free
+        del results
+        torch.cuda.empty_cache()  # bound memory fragmentation growth over a long run
     df_pred = pd.DataFrame(predictions)
     return df_pred
 
