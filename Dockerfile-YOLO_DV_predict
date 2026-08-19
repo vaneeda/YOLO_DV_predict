@@ -43,12 +43,6 @@ ARG TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu126
 # without ever consulting $TORCH_CUDA_INDEX, leaving the base image's CUDA build in place
 RUN pip3 install --force-reinstall --index-url $TORCH_CUDA_INDEX torch torchvision
 
-# predict_DV.py runs many zips through one long-lived process with a changing batch
-# size (16 -> 8 -> 4 -> 2 -> 1 on OOM backoff), which can fragment PyTorch's CUDA
-# allocator badly enough to hit "out of memory" even when total free memory would
-# otherwise suffice; expandable_segments reduces that fragmentation
-ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
 # App code baked in from the local working copy (not GitHub) - so the target machine
 # needs no network access at all, not even to pull code
 COPY predict_DV.py csv2xml.py utils.py /app/
