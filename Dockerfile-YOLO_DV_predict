@@ -18,6 +18,9 @@ COPY predict_DV.py csv2xml.py utils.py /app/
 ARG VARIANT
 COPY variants/${VARIANT}/config.yaml /app/model/config.yaml
 COPY variants/${VARIANT}/best.pt /app/model/best.pt
+# Guarantees model_name always matches the variant actually baked in above,
+# instead of relying on a separately-maintained field inside each config.yaml
+ENV MODEL_NAME=${VARIANT}
 
 # Run when the container launches
 CMD ["/bin/bash", "-c", "cd /app && python3 predict_DV.py"]

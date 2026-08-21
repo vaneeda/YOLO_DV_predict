@@ -100,4 +100,8 @@ if __name__ == '__main__':
                 df = df[df["label"] != "krill"]
         df.to_csv(csvpath, index=False)
         csv_file_paths.append(csvpath)
-    csv2xml(config["model_name"], config["version"], config['xml_file'], csv_file_paths, config['orientation'])
+    # MODEL_NAME is set from the VARIANT build arg in Dockerfile-YOLO_DV_predict,
+    # so it always matches the variant actually baked into the image; config['model_name']
+    # is only a fallback for running outside that image (e.g. locally, no Docker)
+    model_name = os.environ.get("MODEL_NAME", config.get("model_name"))
+    csv2xml(model_name, config["version"], config['xml_file'], csv_file_paths, config['orientation'])
