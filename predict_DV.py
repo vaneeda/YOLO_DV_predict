@@ -1,3 +1,4 @@
+import csv
 import gc
 import os
 import torch
@@ -5,16 +6,24 @@ from ultralytics import YOLO
 from utils import read_images_from_zip, dv_xml_to_csv
 from tqdm import tqdm
 from csv2xml import csv2xml
-import pandas as pd
 import yaml
 
 
-def predict_zip(config, orientation, LUT):
+FIELDNAMES = ["datetime", "depth", "x0", "y0", "x1", "y1", "label", "score"]
+
+
+def open_csv(path):
+    f = open(path, "w", newline="")
+    writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+    writer.writeheader()
+    return f, writer
+
+
+def predict_zip(config, orientation, LUT, xml_by_datetime, out_f, out_writer, krill_f=None, krill_writer=None):
     path_to_data = os.path.join(config["path_to_data"], orientation)
     zipfiles = sorted([i for i in os.listdir(path_to_data) if i.endswith("_active.zip")])
     model = YOLO(config['trained_model'])
     batch_size = config.get("batch", 16)
-    predictions = []
     for zipfile in tqdm(zipfiles, desc=f"Predicting on images from the {orientation} camera"):
         zip_path = os.path.join(path_to_data, zipfile)
         image_data = read_images_from_zip(zip_path)
@@ -42,24 +51,35 @@ def predict_zip(config, orientation, LUT):
                 for result in results:
                     image_name = image_names[start]
                     if len(result.boxes) != 0:
-                        xyxy = result.boxes.xyxy.cpu().numpy()
-                        confs = result.boxes.conf.cpu().numpy()
-                        classes = result.boxes.cls.cpu().numpy().astype(int)
-                        for (x0, y0, x1, y1), conf, cls in zip(xyxy, confs, classes):
-                            label = LUT[cls]
-                            if config["opt_thresholds"] is not None:
-                                opt_thres = config["opt_thresholds"].get(label)
-                                if opt_thres is not None and conf < opt_thres:
-                                    continue
-                            predictions.append({
-                                "datetime": image_name.split(".")[0],  # The image name
-                                "x0": int(x0),  # The x-coordinate of the top-left corner
-                                "y0": int(y0),  # The y-coordinate of the top-left corner
-                                "x1": int(x1),  # The x-coordinate of the bottom-right corner
-                                "y1": int(y1),  # The y-coordinate of the bottom-right corner
-                                "label": label,  # The class ID
-                                "score": round(float(conf), 3)  # The confidence score
-                            })
+                        # Matches the inner join the old pandas-based version did against
+                        # the DeepVision xml: a detection with no corresponding xml frame
+                        # (depth unknown) is dropped rather than written
+                        datetime_key = image_name.split(".")[0]
+                        depth = xml_by_datetime.get(datetime_key)
+                        if depth is not None:
+                            xyxy = result.boxes.xyxy.cpu().numpy()
+                            confs = result.boxes.conf.cpu().numpy()
+                            classes = result.boxes.cls.cpu().numpy().astype(int)
+                            for (x0, y0, x1, y1), conf, cls in zip(xyxy, confs, classes):
+                                label = LUT[cls]
+                                if config["opt_thresholds"] is not None:
+                                    opt_thres = config["opt_thresholds"].get(label)
+                                    if opt_thres is not None and conf < opt_thres:
+                                        continue
+                                row = {
+                                    "datetime": datetime_key,  # The image name
+                                    "depth": depth,
+                                    "x0": int(x0),  # The x-coordinate of the top-left corner
+                                    "y0": int(y0),  # The y-coordinate of the top-left corner
+                                    "x1": int(x1),  # The x-coordinate of the bottom-right corner
+                                    "y1": int(y1),  # The y-coordinate of the bottom-right corner
+                                    "label": label,  # The class ID
+                                    "score": round(float(conf), 3)  # The confidence score
+                                }
+                                if krill_writer is not None:
+                                    krill_writer.writerow(row)
+                                if krill_writer is None or label != "krill":
+                                    out_writer.writerow(row)
                     start += 1
             except (torch.cuda.OutOfMemoryError, RuntimeError) as e:
                 # torch.cuda.OutOfMemoryError only covers PyTorch's own caching
@@ -79,8 +99,11 @@ def predict_zip(config, orientation, LUT):
         # free the last image's GPU tensors - they only die once the cyclic collector runs
         gc.collect()
         torch.cuda.empty_cache()  # bound memory fragmentation growth over a long run
-    df_pred = pd.DataFrame(predictions)
-    return df_pred
+        # Flush now, at the zip boundary, so a crash partway through a later zip
+        # doesn't take this zip's already-written rows down with it
+        out_f.flush()
+        if krill_f is not None:
+            krill_f.flush()
 
 
 if __name__ == '__main__':
@@ -89,16 +112,25 @@ if __name__ == '__main__':
         LUT = {v: k for v, k in enumerate(sorted(config['names']))}
 
     df_xml = dv_xml_to_csv(config['xml_file'])
+    xml_by_datetime = dict(zip(df_xml["datetime"], df_xml["depth"]))
+
     csv_file_paths = []
     for orientation in config['orientation']:
         csvpath = config['xml_file'].split(".")[0] + "_" + orientation + ".csv"
-        df_pred = predict_zip(config, orientation, LUT)
-        df = pd.merge(df_xml, df_pred, left_on="datetime", right_on="datetime", how="inner")
-        if "krill" in config["names"]:
-            if not config["krill"]:
-                df.to_csv(csvpath.split(".")[0]+"_krill.csv", index=False)
-                df = df[df["label"] != "krill"]
-        df.to_csv(csvpath, index=False)
+        krill_excluded = "krill" in config["names"] and not config["krill"]
+
+        out_f, out_writer = open_csv(csvpath)
+        krill_f = krill_writer = None
+        if krill_excluded:
+            krill_f, krill_writer = open_csv(csvpath.split(".")[0] + "_krill.csv")
+
+        try:
+            predict_zip(config, orientation, LUT, xml_by_datetime, out_f, out_writer, krill_f, krill_writer)
+        finally:
+            out_f.close()
+            if krill_f is not None:
+                krill_f.close()
+
         csv_file_paths.append(csvpath)
     # MODEL_NAME is set from the VARIANT build arg in Dockerfile-YOLO_DV_predict,
     # so it always matches the variant actually baked into the image; config['model_name']
