@@ -1,59 +1,23 @@
-# Use an official Python runtime as a parent image
-FROM ultralytics/ultralytics:8.4.121
-RUN echo
-
-# User configuration - override with --build-arg
-ARG user=myuser
-ARG group=mygroup
-ARG uid=1000
-ARG gid=1000
-
-# Set the working directory to
-WORKDIR /project
-
-# Some debs want to interact, even with apt-get install -y, this fixes it
-ENV DEBIAN_FRONTEND=noninteractive
-ENV HOME=/project
-
-# Install any needed packages from apt
-RUN apt-get update && apt-get install -y sudo python3 python3-pip git screen vim
-RUN pip install --upgrade pip
-
-# Configure user - the base image may already ship a user/group at this uid/gid
-# (e.g. ultralytics/ultralytics:8.4.121's built-in "ubuntu" at 1000:1000), so rename
-# it to $user instead of failing on a duplicate id
-RUN groupadd -g $gid $user 2>/dev/null || groupmod -n $user "$(getent group $gid | cut -d: -f1)"
-RUN useradd -u $uid -g $gid -m $user 2>/dev/null || usermod -l $user -d /home/$user -m "$(getent passwd $uid | cut -d: -f1)"
-RUN usermod -a -G sudo $user
-RUN passwd -d $user
-
-# ultralytics, pyyaml, Pillow already ship with the ultralytics/ultralytics base image;
-# pandas and tqdm do not despite being core predict_DV.py imports, and lxml (used by
-# csv2xml.py) is needed too - verified by importing each inside the built image.
-RUN pip3 install --trusted-host pypi.python.org lxml pandas tqdm
-
-# this base image ships torch/torchvision built for CUDA 12.8, which needs a newer
-# driver than some hosts have - reinstall from a CUDA index within that host's driver
-# support. Override at build time to match the machine you're building for, e.g.:
-#   --build-arg TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu124  (max CUDA 12.5, e.g. this dev laptop)
-#   --build-arg TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu126  (max CUDA 12.6, e.g. the RTX 3090 host)
-ARG TORCH_CUDA_INDEX=https://download.pytorch.org/whl/cu126
-# --force-reinstall is required: the base image already has *a* torch installed, so a
-# plain `pip install torch` sees that as satisfying the request and silently no-ops
-# without ever consulting $TORCH_CUDA_INDEX, leaving the base image's CUDA build in place
-RUN pip3 install --force-reinstall --index-url $TORCH_CUDA_INDEX torch torchvision
+# Variant image: app code + one variant's config/weights, built FROM a local base image
+# tag (see Dockerfile.base) - never the network, so this build works fully offline.
+# Rebuild this whenever predict_DV.py/csv2xml.py/utils.py or a variant's config/weights
+# change; rebuild Dockerfile.base instead when system/python deps or the target host's
+# CUDA index need to change.
+#
+# Pick the base tag matching the target host's CUDA index, e.g.:
+#   docker build -t yolo_dv_redfish:latest --build-arg BASE_IMAGE=yolo_dv_base:cu126 --build-arg VARIANT=redfish -f Dockerfile-YOLO_DV_predict .
+ARG BASE_IMAGE=yolo_dv_base:cu126
+FROM ${BASE_IMAGE}
 
 # App code baked in from the local working copy (not GitHub) - so the target machine
 # needs no network access at all, not even to pull code
 COPY predict_DV.py csv2xml.py utils.py /app/
 
 # Config + weights for one variant, selected at build time, e.g. --build-arg VARIANT=redfish
-# (see variants/<name>/) - copied last so switching variants doesn't invalidate the
-# expensive, network-heavy layers above
+# (see variants/<name>/)
 ARG VARIANT
 COPY variants/${VARIANT}/config.yaml /app/model/config.yaml
 COPY variants/${VARIANT}/best.pt /app/model/best.pt
 
 # Run when the container launches
 CMD ["/bin/bash", "-c", "cd /app && python3 predict_DV.py"]
-
