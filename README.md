@@ -71,7 +71,7 @@ Assumes the host machine has internet access to build the initial base image
 
 6. **Run** on the deployment machine:
    ```bash
-   docker run -it --gpus "device=1" --rm --user <uid>:<gid> \
+   docker run -it --gpus all --rm --user <uid>:<gid> \
      -v /path/to/station/data:/data \
      -v /path/to/output:/temp \
      yolo_dv:redfish
