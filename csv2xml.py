@@ -108,8 +108,7 @@ def csv2xml(model_name, v, input_xml_path, csv_input_paths, orientations):
 
     # Initialize static framework information
     class Framework_data:
-        #name = "Fish_species_detector_v1.0_Vaneeda_dockerimage"
-        name = model_name
+        name = "YOLO_DV"
         version = str(v)
         species = "None"  # Default value if no label is given (labeltype != 'image' and  labeltype != 'all')
         labeltype = "object"  # Fish instances are detected
